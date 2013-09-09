@@ -5,7 +5,7 @@ class PDFStream
 		@stream = stream
 	end
 	def inspect
-		"<PDFStream:#{dict},#{stream}>"
+		"<PDFStream:#{dict},#{stream.size}>"
 	end
 end
 
@@ -57,9 +57,10 @@ class PDFDocument
 		end
 		lines = read_next_lines(loc, 2, 5)
 		@xinf = []
-		# can't deal with xref streams for the time being
 		if lines =~ /\A(xref#{eol})/
 			load_real_xinf_and_trailer loc, true
+		else
+			load_real_xinf_stream loc, true
 		end
 	end
 	def load_real_xinf_and_trailer(loc, latest=false)
@@ -84,10 +85,23 @@ class PDFDocument
 					@trailer = trailer
 				end
 				#p trailer
+				if trailer.has_key?(:XRefStm)
+					load_real_xinf_stream trailer[:XRefStm]
+				end
 				if trailer.has_key?(:Prev)
 					load_real_xinf_and_trailer trailer[:Prev]
 				end
 			end
+		end
+	end
+	def load_real_xinf_stream(loc, chain=false)
+		xstm = read_object(loc)[0]
+		@xinf << xstm
+		if @trailer.nil?
+			@trailer = xstm.dict
+		end
+		if chain && xstm.dict.has_key?(:Prev)
+			load_real_xinf_stream xstm.dict[:Prev], true
 		end
 	end
 	def xref_loc
@@ -288,7 +302,7 @@ class PDFDocument
 							end
 							#puts "Got final token (hopefully endobj)"
 							tlen += token[1]
-							real_obj = PDFStream(obj[0], stream)
+							real_obj = PDFStream.new(obj[0], stream)
 						end
 						if token[0] != :endobj
 							#puts "Failed to get end token (had #{obj[0]}, final parse result is #{token})"
