@@ -84,6 +84,7 @@ class PDFDocument
 	end
 	SeqMap = {'t' => "\t", 'r' => "\r", 'n' => "\n", 'f' => "\f", 'v' => "\v", "\n" => ''}
 	def parse(data)
+		#puts "Parsing #{data}"
 		data = data.sub /\A(#{anyspace}*)/, ''
 		ilen = $1 ? $1.size : 0
 		if data[0] == '['
@@ -193,11 +194,24 @@ class PDFDocument
 					if type == :R
 						return [[num, num2, type], ilen + len + xlen]
 					else
-						# do nothing for now
+						obj = parse(data[len + xlen .. -1])
+						if !obj.is_a? Array
+							#puts "Failed to parse inner object"
+							return ilen # failed to parse object
+						end
+						if obj[0].is_a? Hash
+							# check for stream
+						end
+						token = parse(data[len + xlen + obj[1] .. -1])
+						if !token.is_a? Array || token[0] != :endobj
+							#puts "Failed to get end token (had #{obj[0]}, final parse result is #{token})"
+							return ilen # failed to get end token
+						end
+						return [[num, num2, :obj, obj[0]], ilen + len + xlen + obj[1] + token[1]]
 					end
 				end
 			end
-			puts "Survived"
+			#puts "Survived"
 			return [num, ilen + len]
 		elsif data =~ /\A\/(#{regular}*)/
 			len = 1 + $1.size
