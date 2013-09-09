@@ -76,15 +76,17 @@ class PDFDocument
 	end
 	def read_object(pos, est=10)
 		data = read_from(pos, est)
+		fsize = @fh.size
 		while !((result = parse(data)).is_a? Array) && pos + est < fsize
 			est = [est * 2, fsize - pos].min
+			puts "Retrying with est=#{est}"
 			data = read_from(pos, est)
 		end
 		return result
 	end
 	SeqMap = {'t' => "\t", 'r' => "\r", 'n' => "\n", 'f' => "\f", 'v' => "\v", "\n" => ''}
 	def parse(data)
-		#puts "Parsing #{data}"
+		#puts "Parsing '#{data}'"
 		data = data.sub /\A(#{anyspace}*)/, ''
 		ilen = $1 ? $1.size : 0
 		if data[0] == '['
@@ -182,12 +184,12 @@ class PDFDocument
 			end
 			if num.integer? && num >= 0
 				#puts "Got positive integer"
-				if data[len..-1] =~ / \A (#{anyspace}+#{pos_int})? #{anyspace}* \z /x
-					#puts "#{data[len..-1]} - could lead into obj or obj ref"
+				if data[len..-1] =~ / \A ( #{anyspace}* | #{anyspace}+ #{pos_int} (#{anyspace}* | #{anyspace}+ #{regular}+)) \z /x
+					puts "#{data[len..-1]} - could lead into obj or obj ref"
 					return ilen # we don't know whether there is an obj or obj ref
 				end
 				if data[len..-1] =~ / \A (#{anyspace}+ (#{pos_int}) #{anyspace}+ (R|obj)\b) /x
-					#puts "Is obj or obj ref"
+					puts "Is obj or obj ref"
 					num2 = $2.to_i
 					type = $3.to_sym
 					xlen = $1.size
@@ -206,35 +208,35 @@ class PDFDocument
 						tlen = len + xlen + obj[1] + token[1]
 						real_obj = [num, num2, :obj, obj[0]]
 						if obj[0].is_a?(Hash) && token[0] == :stream
-							puts "Parsing stream"
+							#puts "Parsing stream"
 							if data[tlen..-1] !~ /\A ( ( #{comment} | #{sp} )* \r?\n ) /x
 								return ilen # failed - stream token followed by inappropriate chars
 							end
-							puts "Got good chars"
+							#puts "Got good chars"
 							tlen += $1.size
 							if !obj[0].has_key?(:Length) || !obj[0][:Length].integer? || obj[0][:Length] < 0
 								return ilen # failed - not allowing Length refs for now
 							end
 							length = obj[0][:Length]
-							puts "Got length = #{length}"
+							#puts "Got length = #{length}"
 							if data.length < tlen + length + 18 # we need at least "\nendstream\nendobj" and 1 more char to ensure end of token
-								puts "Not enough chars"
+								#puts "Not enough chars"
 								return ilen # failed - whole stream not present
 							end
-							puts "Got enough chars"
+							#puts "Got enough chars"
 							stream = data[tlen ... tlen + length]
 							tlen += length
 							estoken = parse(data[tlen .. -1])
 							if !estoken.is_a?(Array) || estoken[0] != :endstream
 								return ilen
 							end
-							puts "Got endstream"
+							#puts "Got endstream"
 							tlen += estoken[1]
 							token = parse(data[tlen .. -1])
 							if !token.is_a?(Array)
 								return ilen
 							end
-							puts "Got final token (hopefully endobj)"
+							#puts "Got final token (hopefully endobj)"
 							tlen += token[1]
 							real_obj = [num, num2, :stream, obj[0], stream]
 						end
