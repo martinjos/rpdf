@@ -104,6 +104,7 @@ class PDFDocument
 		@fh = nil
 		@xinf = nil
 		@trailer = nil
+		@cache = Hash.new {|h,k| h[k] = {} }
 	end
 	def open
 		if @fh.nil?
@@ -380,11 +381,13 @@ class PDFDocument
 							#puts "Got final token (hopefully endobj)"
 							tlen += token[1]
 							real_obj = PDFStream.new(obj[0], stream)
+							real_obj.apply_filters # automatically apply filters
 						end
 						if token[0] != :endobj
 							#puts "Failed to get end token (had #{obj[0]}, final parse result is #{token})"
 							return ilen # failed to get end token
 						end
+						@cache[num][num2] = real_obj # automatically store in cache
 						return [real_obj, ilen + tlen]
 					end
 				end
