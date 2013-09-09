@@ -1,0 +1,12 @@
+() string		read until terminating ), balancing () and skipping (and perhaps translating) \ sequences
+[] array		read objects (and ignore comments) until ]
+<< >> dict		read objects (and ignore comments) until >>
+num1 num2 obj endobj	when number is read, read ahead to check whether it is followed by another number, and then the keyword "obj". then read an object (and ignore comments). if it is a dictionary, try to read a stream. then (ignore comments and) try to read endobj
+num1 num2 R		when number is read, read ahead to check whether it is followed by another number, and then the keyword "R"
+stream endstream	get stream Length from dictionary (possibly via an xref table). read that many bytes following LF. then read endstream
+
+number			atomic - read until char that doesn't belong to number (but see obj)
+<> string		atomic - read up to first >
+/word			read keyword, obeying # sequences, until char that doesn't belong to keyword
+keyword			read until char that doesn't belong to keyword
+

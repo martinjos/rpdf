@@ -1,0 +1,42 @@
+any 8-bit char is either whitespace (including EOL chars), delimiter (all brackets, slash, and percent), or "regular"
+true, false, null, and obj are keywords
+comments are after %, and apart from %PDF-n.m and %%EOF, are ignored
+real is not allowed to have exponent
+integer is allowed in place of real
+strings are in parentheses () - embedded () must be balanced; backslash for escaping, removing EOL, C codes, and \ddd octal; any EOL treated as 0A
+hex strings are in angle brackets <> - whitespace ignored, missing final digit 0
+names are sequences of zero or more printable ASCII chars (except hash) and/or 2-digit hex codes preceded by hash, preceded by slash
+arrays are sequences of objects (separated by whitespace where necessary) enclosed in []
+dictionaries are sequences of pairs of objects enclosed in << >>. If a value is null, it is treated as if the key is not set
+an indirect object is an object number (arbitrary, unique) and generation number (how many edits to file), obj, value, endobj
+a generation number of 65535 prevents a free object from being reused
+an indirect reference is obj number, gen number, R
+an indirect reference to a nonexistent object is treated as a reference to null
+a stream is a string of unlimited length. It consists of a dictionary followed by the keyword stream, an EOL ending in LF, the data, an EOL, endstream
+streams may reference external files, in which case the embedded data is ignored
+streams may have filters
+stream Length is the space the data takes up in the file (i.e. the number of bytes to skip) - even if the real data is in a separate file
+all streams must be indirect objects
+PDF allows a stream whose Length field is deferred to be defined as an indirect object after the stream (but it will be accessible via an xref table)
+the most useful stream filter seems to be FlateDecode (zlib), all of whose parameters seem to be concerned with images
+a PDF file consists of a header (one line), body, xref table and trailer
+the version in the header can be overridden by the Version entry in the document's catalog dictionary, located via the Root entry in the trailer
+the four binary characters after the header are there to ensure correct behaviour of file-type-detection algorithms
+the cross-reference table, or a cross-reference stream, may be used to locate objects in the file
+its format is: "xref" EOL ( <first-obj-num> <num-objs> EOL ( offset{10} generation{5} [nf] EOL {20 chars} )* )*
+the trailer is: "trailer" EOL <trailer-dictionary> EOL startxref EOL <start-of-last-xref-keyword> EOL %%EOF
+the generation number is the number of times an object has been deleted (not changed)
+an object stream can contain any object except for a stream, the Length value for an object stream, the encryption dictionary
+an object stream can only be used to store objects with a generation number of 0
+(PDF has some other weird rules about what you can't use generation numbers greater than 0 for, in certain specific cases)
+(PDF has extra rules here for "linearized" files)
+an object stream requires cross-reference stream(s) to be used for access
+an object stream is a stream with some extra dictionary entries, including First, the offset of the first entry
+the data contains N pairs of integers, <object-number> <offset-from-first-object>, offsets in increasing order, then N objects
+an object stream entry shall not consist solely of an object reference
+the generation number of the object stream itself must be 0
+the startxref section may reference a cross-reference stream object instead of an xref keyword. The xref and trailer data are contained in a stream
+the xref stream dictionary is a combination of the stream dictionary, the trailer dictionary, and some additional entries
+the trailer dictionary in a standard trailer can also contain an XRefStm entry, pointing to a xref stream object, searched just before Prev
+the root object (the document catalog), and any reachable object required to be non-null, must be in the main table(s)
+
