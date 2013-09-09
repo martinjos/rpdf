@@ -8,6 +8,14 @@ module PDFUtils
 		end
 		return val
 	end
+
+	def self.bytes_to_int(bytes)
+		r = 0
+		(0...bytes.size).each{|i|
+			r = (r << 8) | bytes[i]
+		}
+		r
+	end
 end
 
 class PDFDict < Hash
@@ -115,16 +123,16 @@ class PDFOldRefTab < PDFRefTab
 			raise Exception.new("Object number out of range")
 		end
 		pos = (n-@first)*20
-		puts "Using pos #{pos}"
+		#puts "Using pos #{pos}"
 		entry = @data[pos...pos+20]
 		puts "Entry is #{entry}"
 		fpos = entry[0...10].to_i
 		gen = entry[11...16].to_i
 		new = entry[17] == 'n'
 		if !new
-			return nil
+			return [nil, gen]
 		end
-		puts "Reading object at #{fpos}"
+		#puts "Reading object at #{fpos}"
 		# FIXME: there is a disconnect between the params passed in here and those used for the cache
 		obj = @doc.read_object(fpos)
 		return [obj, gen]
@@ -135,7 +143,47 @@ class PDFOldRefTab < PDFRefTab
 end
 
 class PDFStreamRefTab < PDFRefTab
-	def initialize(stream)
+	def initialize(doc, stm_obj)
+		@doc = doc
+		@index = stm_obj.dict[:Index].each_slice(2).to_a
+		@w = stm_obj.dict[:W]
+		@reclen = @w.inject(&:+)
+		@stream = stm_obj.stream
+	end
+	def load(n)
+		offset = 0
+		@index.each{|first,num|
+			if n >= first && n < first + num
+				pos = (offset + n-first)*@reclen
+				puts "Using pos #{pos}"
+				entry = @stream[pos...pos+@reclen].split('').map(&:ord)
+				type = PDFUtils.bytes_to_int(entry.shift(@w[0]))
+				f2 = PDFUtils.bytes_to_int(entry.shift(@w[1]))
+				f3 = PDFUtils.bytes_to_int(entry.shift(@w[2]))
+				puts "Got type=#{type}, f2=#{f2}, f3=#{f3}"
+				obj = nil
+				gen = nil
+				if type == 1
+					# plain
+					obj = @doc.read_object(f2)
+					gen = f3
+				elsif type == 2
+					# in object stream
+					# (not implemented)
+					#objstr = @doc.find_object(f2, 0)
+					#obj = objstr.
+					gen = 0
+				else
+					gen = f3 # deleted/other
+				end
+				return [obj, gen]
+			end
+			offset += num
+		}
+		raise Exception.new("Object number out of range")
+	end
+	def inspect
+		"<PDFStreamRefTab:#{@index},#{@w}>"
 	end
 end
 
@@ -215,7 +263,7 @@ class PDFDocument
 	end
 	def load_real_xinf_stream(loc, chain=false)
 		xstm = read_object(loc)
-		@xinf << xstm
+		@xinf << PDFStreamRefTab.new(self, xstm)
 		if @trailer.nil?
 			@trailer = xstm.dict
 		end
@@ -256,6 +304,12 @@ class PDFDocument
 			data = read_from(pos, est)
 		end
 		data
+	end
+	def find_object(n, g)
+		if @cache[n].has_key?(g)
+			return @cache[n][g]
+		end
+		return nil
 	end
 	def read_object(pos, est=10)
 		data = read_from(pos, est)
