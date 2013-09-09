@@ -199,15 +199,50 @@ class PDFDocument
 							#puts "Failed to parse inner object"
 							return ilen # failed to parse object
 						end
-						if obj[0].is_a? Hash
-							# check for stream
-						end
 						token = parse(data[len + xlen + obj[1] .. -1])
-						if !token.is_a? Array || token[0] != :endobj
+						if !token.is_a? Array
+							return ilen # failed to get token
+						end
+						tlen = len + xlen + obj[1] + token[1]
+						real_obj = [num, num2, :obj, obj[0]]
+						if obj[0].is_a?(Hash) && token[0] == :stream
+							puts "Parsing stream"
+							if data[tlen..-1] !~ /\A ( ( #{comment} | #{sp} )* \r?\n ) /x
+								return ilen # failed - stream token followed by inappropriate chars
+							end
+							puts "Got good chars"
+							tlen += $1.size
+							if !obj[0].has_key?(:Length) || !obj[0][:Length].integer? || obj[0][:Length] < 0
+								return ilen # failed - not allowing Length refs for now
+							end
+							length = obj[0][:Length]
+							puts "Got length = #{length}"
+							if data.length < tlen + length + 18 # we need at least "\nendstream\nendobj" and 1 more char to ensure end of token
+								puts "Not enough chars"
+								return ilen # failed - whole stream not present
+							end
+							puts "Got enough chars"
+							stream = data[tlen ... tlen + length]
+							tlen += length
+							estoken = parse(data[tlen .. -1])
+							if !estoken.is_a?(Array) || estoken[0] != :endstream
+								return ilen
+							end
+							puts "Got endstream"
+							tlen += estoken[1]
+							token = parse(data[tlen .. -1])
+							if !token.is_a?(Array)
+								return ilen
+							end
+							puts "Got final token (hopefully endobj)"
+							tlen += token[1]
+							real_obj = [num, num2, :stream, obj[0], stream]
+						end
+						if token[0] != :endobj
 							#puts "Failed to get end token (had #{obj[0]}, final parse result is #{token})"
 							return ilen # failed to get end token
 						end
-						return [[num, num2, :obj, obj[0]], ilen + len + xlen + obj[1] + token[1]]
+						return [real_obj, ilen + tlen]
 					end
 				end
 			end
@@ -280,7 +315,10 @@ class PDFDocument
 		/[^\s()<>\[\]{}\/%]/
 	end
 	def comment
-		/%[^\r\n]*#{eol}/
+		/#{bare_comment}#{eol}/
+	end
+	def bare_comment
+		/%[^\r\n]*/
 	end
 	def max_offset_digits
 		1 + Math.log(@fh.size, 10).floor
