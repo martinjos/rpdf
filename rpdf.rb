@@ -19,7 +19,7 @@ class PDFDocument
 		end
 		lines = read_next_lines(loc, 2, 9 + max_offset_digits * 2)
 		xinf = []
-		if lines =~ /^(xref#{eol})/
+		if lines =~ /\A(xref#{eol})/
 			sloc = loc + $1.size
 			lines = lines[$1.size..-1]
 			while lines =~ /(([0-9]+) ([0-9]+)#{eol})/
@@ -30,7 +30,7 @@ class PDFDocument
 				xinf << [first_id, num_ids, start]
 				lines = read_next_lines(sloc, 1, [9, 3 + max_offset_digits * 2].max)
 			end
-			if lines =~ /^(trailer#{eol})/
+			if lines =~ /\A(trailer#{eol})/
 				puts "Found trailer"
 				#sloc += $1.size
 				#tdict = read_object(sloc)
@@ -68,7 +68,7 @@ class PDFDocument
 		data = ""
 		fsize = @fh.size
 		data = read_from(pos, est)
-		while data !~ / ^ (#{neol}*#{eol}) {#{n-1}} #{neol}* (#{eol}?$|#{eolp}) $ /x && pos + est < fsize
+		while data !~ / \A (#{neol}*#{eol}) {#{n-1}} #{neol}* (#{eol}?\z|#{eolp}) /x && pos + est < fsize
 			est = [est * 2, fsize - pos].min
 			data = read_from(pos, est)
 		end
@@ -84,7 +84,7 @@ class PDFDocument
 	end
 	SeqMap = {'t' => "\t", 'r' => "\r", 'n' => "\n", 'f' => "\f", 'v' => "\v", "\n" => ''}
 	def parse(data)
-		data = data.sub /^((\s|#{comment})*)/, ''
+		data = data.sub /\A(#{anyspace}*)/, ''
 		ilen = $1 ? $1.size : 0
 		if data[0] == '['
 			rec = parse_array(data[1..-1])
@@ -157,7 +157,7 @@ class PDFDocument
 				return ilen
 			end
 			return [str, ilen + pos]
-		elsif data =~ /^(<([0-9A-Fa-f\s]*)>)/
+		elsif data =~ /\A(<([0-9A-Fa-f\s]*)>)/
 			len = $1.size
 			str = $2.gsub(/\s+/, '').gsub(/#{hex}{1,2}/) {|match|
 				if match.size == 1
@@ -167,7 +167,7 @@ class PDFDocument
 				end
 			}
 			return [str, ilen + len]
-		elsif data =~ /^(#{number})/
+		elsif data =~ /\A(#{number})/
 			len = $1.size
 			if len == data.size
 				return ilen # we don't know whether it's the true end
@@ -179,8 +179,27 @@ class PDFDocument
 			else
 				num = str.to_i
 			end
+			if num.integer? && num >= 0
+				#puts "Got positive integer"
+				if data[len..-1] =~ / \A (#{anyspace}+#{pos_int})? #{anyspace}* \z /x
+					#puts "#{data[len..-1]} - could lead into obj or obj ref"
+					return ilen # we don't know whether there is an obj or obj ref
+				end
+				if data[len..-1] =~ / \A (#{anyspace}+ (#{pos_int}) #{anyspace}+ (R|obj)\b) /x
+					#puts "Is obj or obj ref"
+					num2 = $2.to_i
+					type = $3.to_sym
+					xlen = $1.size
+					if type == :R
+						return [[num, num2, type], ilen + len + xlen]
+					else
+						# do nothing for now
+					end
+				end
+			end
+			puts "Survived"
 			return [num, ilen + len]
-		elsif data =~ /^\/(#{regular}*)/
+		elsif data =~ /\A\/(#{regular}*)/
 			len = 1 + $1.size
 			if len == data.size
 				return ilen # we don't know whether it's the true end
@@ -190,7 +209,7 @@ class PDFDocument
 				$1.hex.chr
 			}.to_sym
 			return [sym, ilen + len]
-		elsif data =~ /^(#{regular}+)/
+		elsif data =~ /\A(#{regular}+)/
 			len = $1.size
 			if len == data.size
 				return ilen # we don't know whether it's the true end
@@ -219,6 +238,9 @@ class PDFDocument
 		pos += item # this will be size of spaces/comments
 		return [array, pos]
 	end
+	def anyspace
+		/\s|#{comment}/
+	end
 	def oct
 		/[0-7]/
 	end
@@ -236,6 +258,9 @@ class PDFDocument
 	end
 	def number
 		/-?([0-9]+(\.[0-9]*)?|\.[0-9]+)/
+	end
+	def pos_int
+		/[0-9]+/
 	end
 	def regular
 		/[^\s()<>\[\]{}\/%]/
@@ -261,10 +286,10 @@ class PDFDocument
 	def xref_loc_for_size(bsize)
 		str = read_last(bsize)
 		#puts "Got #{str.size} bytes"
-		if str !~ /(#{eol}#{neol}*){3}#{eol}?$/ 
+		if str !~ /(#{eol}#{neol}*){3}#{eol}?\z/ 
 			return nil
 		end
-		if str =~ /#{eol}startxref#{eol}(#{pos_int})#{eol}%%EOF#{eol}?$/
+		if str =~ /#{eol}startxref#{eol}(#{pos_int})#{eol}%%EOF#{eol}?\z/
 			return $1.to_i
 		else
 			return false
