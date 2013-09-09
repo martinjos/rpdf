@@ -52,7 +52,7 @@ class PDFDocument
 		return loc
 	end
 
-private
+#private
 	def read_last(n)
 		open
 		@fh.seek(-n, IO::SEEK_END)
@@ -73,6 +73,82 @@ private
 			data = read_from(pos, est)
 		end
 		data
+	end
+	def read_object(pos, est=10)
+		data = read_from(pos, est)
+		while (result = parse(data)).nil? && pos + est < fsize
+			est = [est * 2, fsize - pos].min
+			data = read_from(pos, est)
+		end
+		return result
+	end
+	def parse(data)
+		data.sub! /^(\s|#{comment})*/, ''
+		if data[0] == '['
+		elsif data[0..1] == '<<'
+		elsif data[0] == '('
+		elsif data =~ /^(<([0-9A-Fa-f\s]*)>)/
+			len = $1.size
+			str = $2.gsub(/\s+/, '').gsub(/#{hex}{1,2}/) {|match|
+				if match.size == 1
+					''
+				else
+					match.hex.chr
+				end
+			}
+			return [str, len]
+		elsif data =~ /^(#{number})/
+			len = $1.size
+			str = $1
+			num = nil
+			if str =~ /\./
+				num = str.to_f
+			else
+				num = str.to_i
+			end
+			return [num, len]
+		elsif data =~ /^\/(#{regular}*)/
+			len = 1 + $1.size
+			str = $1
+			sym = str.gsub(/#(#{hex}{2})/) {|match|
+				$1.hex.chr
+			}.to_sym
+			return [sym, len]
+		elsif data =~ /^(#{regular}+)/
+			len = $1.size
+			str = $1
+			sym = str.to_sym
+			if sym == :true
+				sym = true
+			elsif sym == :false
+				sym = false
+			elsif sym == :null
+				sym = nil
+			end
+			return [sym, len]
+		end
+		return nil
+	end
+	def hex
+		/[0-9A-F]/i
+	end
+	def eeol
+		/(#{fsp}*(#{comment}|#{eol}))+#{fsp}*/
+	end
+	def fsp
+		/[ \t\f]/
+	end
+	def sp
+		/[ \t]+/
+	end
+	def number
+		/-?([0-9]+(\.[0-9]*)?|\.[0-9]+)/
+	end
+	def regular
+		/[^\s()<>\[\]{}\/%]/
+	end
+	def comment
+		/%[^\r\n]*#{eol}/
 	end
 	def max_offset_digits
 		1 + Math.log(@fh.size, 10).floor
