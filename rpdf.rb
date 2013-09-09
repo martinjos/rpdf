@@ -39,36 +39,50 @@ class PDFStream
 				allow = Set.new([:Columns, :Predictor])
 				parms.keys.each{|name|
 					if !allow.member? name
-						raise Exception("Unrecognised parameter for FlateDecode: #{name}")
+						raise Exception.new("Unrecognised parameter for FlateDecode: #{name}")
 					end
 				}
 				pred = parms[:Predictor]
 				cols = parms[:Columns]
 				if pred && pred != 12
-					raise Exception("Unsupported FlateDecode predictor: #{pred}")
+					raise Exception.new("Unsupported FlateDecode predictor: #{pred}")
 				end
 				if pred && (!cols || !cols.integer? || cols < 1)
-					raise Exception("FlateDecode predictor 12 without valid Columns value")
+					raise Exception.new("FlateDecode predictor 12 without valid Columns value")
 				end
 				temp = Zlib::Inflate.inflate(@stream)
 				if pred
-					diffrows(temp, cols)
+					temp = diffrows(temp, cols)
 				end
 				@stream = temp
 			else
-				raise Exception("Unsupported filter: #{filter}")
+				raise Exception.new("Unsupported filter: #{filter}")
 			end
 		}
 		dict.delete(:Filter)
 		dict.delete(:DecodeParms)
 	end
 	def diffrows(data, cols)
-		data <<= "\0" * (4 - data.size%4)
-		(cols...data.size).step(cols) {|i|
-			(i...i+cols).each{|j|
-				data[j] = ((data[j].ord + data[j-cols].ord) % 256).chr
+		divmod = data.size.divmod(cols + 1)
+		if divmod[1] != 0
+			raise Exception.new("FlateDecoder/PNG predictor: invalid buffer size")
+		end
+		out = "\0" * (cols * divmod[0])
+		out[0...cols] = data[1...cols+1]
+		data_i = cols + 2
+		out_i = cols
+		(1...divmod[0]).each {|i|
+			if data[data_i-1].ord != 2
+				raise Exception.new("FlateDecoder/PNG predictor - wrong algorithm code - #{data[data_i-1]}")
+			end
+			(0...cols).each{|j|
+				out[out_i] = ((data[data_i].ord + data[data_i-cols-1].ord) % 256).chr
+				data_i += 1
+				out_i += 1
 			}
+			data_i += 1
 		}
+		out
 	end
 end
 
