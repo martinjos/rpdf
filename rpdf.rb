@@ -99,6 +99,9 @@ class PDFDocument
 			return [str, len]
 		elsif data =~ /^(#{number})/
 			len = $1.size
+			if len == data.size
+				return nil # we don't know whether it's the true end
+			end
 			str = $1
 			num = nil
 			if str =~ /\./
@@ -109,6 +112,9 @@ class PDFDocument
 			return [num, len]
 		elsif data =~ /^\/(#{regular}*)/
 			len = 1 + $1.size
+			if len == data.size
+				return nil # we don't know whether it's the true end
+			end
 			str = $1
 			sym = str.gsub(/#(#{hex}{2})/) {|match|
 				$1.hex.chr
@@ -116,6 +122,9 @@ class PDFDocument
 			return [sym, len]
 		elsif data =~ /^(#{regular}+)/
 			len = $1.size
+			if len == data.size
+				return nil # we don't know whether it's the true end
+			end
 			str = $1
 			sym = str.to_sym
 			if sym == :true
