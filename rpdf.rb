@@ -55,9 +55,16 @@ class PDFDocument
 		if !loc
 			return nil
 		end
-		lines = read_next_lines(loc, 2, 9 + max_offset_digits * 2)
+		lines = read_next_lines(loc, 2, 5)
 		@xinf = []
 		# can't deal with xref streams for the time being
+		if lines =~ /\A(xref#{eol})/
+			load_real_xinf_and_trailer loc, true
+		end
+	end
+	def load_real_xinf_and_trailer(loc, latest=false)
+		#puts "Loading xinf at #{loc}"
+		lines = read_next_lines(loc, 2, 9 + max_offset_digits * 2)
 		if lines =~ /\A(xref#{eol})/
 			sloc = loc + $1.size
 			lines = lines[$1.size..-1]
@@ -72,7 +79,14 @@ class PDFDocument
 			if lines =~ /\A(trailer#{eol})/
 				#puts "Found trailer"
 				sloc += $1.size
-				@trailer = read_object(sloc)
+				trailer = read_object(sloc)[0]
+				if latest
+					@trailer = trailer
+				end
+				#p trailer
+				if trailer.has_key?(:Prev)
+					load_real_xinf_and_trailer trailer[:Prev]
+				end
 			end
 		end
 	end
@@ -115,7 +129,7 @@ class PDFDocument
 		fsize = @fh.size
 		while !((result = parse(data)).is_a? Array) && pos + est < fsize
 			est = [est * 2, fsize - pos].min
-			puts "Retrying with est=#{est}"
+			#puts "Retrying with est=#{est}"
 			data = read_from(pos, est)
 		end
 		return result
