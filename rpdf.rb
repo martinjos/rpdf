@@ -96,7 +96,10 @@ class PDFDocument
 			if rec[1] > data.size - 4 || data[rec[1] + 2..rec[1] + 3] != '>>'
 				return nil
 			end
-			return [rec[0], ilen + rec[1] + 4]
+			if rec[0].size % 2 == 1
+				rec[0].pop
+			end
+			return [Hash[*rec[0]], ilen + rec[1] + 4]
 		elsif data[0] == '('
 		elsif data =~ /^(<([0-9A-Fa-f\s]*)>)/
 			len = $1.size
