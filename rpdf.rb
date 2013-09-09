@@ -76,16 +76,27 @@ class PDFDocument
 	end
 	def read_object(pos, est=10)
 		data = read_from(pos, est)
-		while (result = parse(data)).nil? && pos + est < fsize
+		while !((result = parse(data)).is_a? Array) && pos + est < fsize
 			est = [est * 2, fsize - pos].min
 			data = read_from(pos, est)
 		end
 		return result
 	end
 	def parse(data)
-		data.sub! /^(\s|#{comment})*/, ''
+		data = data.sub /^((\s|#{comment})*)/, ''
+		ilen = $1 ? $1.size : 0
 		if data[0] == '['
+			rec = parse_array(data[1..-1])
+			if rec[1] > data.size - 2 || data[rec[1] + 1] != ']'
+				return nil
+			end
+			return [rec[0], ilen + rec[1] + 2]
 		elsif data[0..1] == '<<'
+			rec = parse_array(data[2..-1])
+			if rec[1] > data.size - 4 || data[rec[1] + 2..rec[1] + 3] != '>>'
+				return nil
+			end
+			return [rec[0], ilen + rec[1] + 4]
 		elsif data[0] == '('
 		elsif data =~ /^(<([0-9A-Fa-f\s]*)>)/
 			len = $1.size
@@ -96,7 +107,7 @@ class PDFDocument
 					match.hex.chr
 				end
 			}
-			return [str, len]
+			return [str, ilen + len]
 		elsif data =~ /^(#{number})/
 			len = $1.size
 			if len == data.size
@@ -109,7 +120,7 @@ class PDFDocument
 			else
 				num = str.to_i
 			end
-			return [num, len]
+			return [num, ilen + len]
 		elsif data =~ /^\/(#{regular}*)/
 			len = 1 + $1.size
 			if len == data.size
@@ -119,7 +130,7 @@ class PDFDocument
 			sym = str.gsub(/#(#{hex}{2})/) {|match|
 				$1.hex.chr
 			}.to_sym
-			return [sym, len]
+			return [sym, ilen + len]
 		elsif data =~ /^(#{regular}+)/
 			len = $1.size
 			if len == data.size
@@ -134,9 +145,20 @@ class PDFDocument
 			elsif sym == :null
 				sym = nil
 			end
-			return [sym, len]
+			return [sym, ilen + len]
 		end
-		return nil
+		return ilen
+	end
+	def parse_array(data)
+		array = []
+		pos = 0
+		while (item = parse(data[pos..-1])).is_a? Array
+			puts "pos is #{pos}"
+			array << item[0]
+			pos += item[1]
+		end
+		pos += item # this will be size of spaces/comments
+		return [array, pos]
 	end
 	def hex
 		/[0-9A-F]/i
