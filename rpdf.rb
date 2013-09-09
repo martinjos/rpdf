@@ -115,6 +115,17 @@ class PDFDocument
 							pos += 1 # 2 more added on at end
 						end
 						# nothing appended to str
+					elsif data[pos + 1] =~ oct
+						o = data[pos + 1]
+						if pos + 2 < data.size && data[pos + 2] =~ oct
+							o += data[pos + 2]
+							if pos + 3 < data.size && data[pos + 3] =~ oct
+								o += data[pos + 3]
+								pos += 1
+							end
+							pos += 1
+						end
+						str += o.oct.chr
 					elsif SeqMap.has_key? data[pos + 1]
 						str += SeqMap[data[pos + 1]]
 					else
@@ -207,6 +218,9 @@ class PDFDocument
 		end
 		pos += item # this will be size of spaces/comments
 		return [array, pos]
+	end
+	def oct
+		/[0-7]/
 	end
 	def hex
 		/[0-9A-F]/i
