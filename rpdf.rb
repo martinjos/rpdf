@@ -31,7 +31,9 @@ class PDFStream
 	end
 	def apply_filters
 		filters = dict.ensure_array(:Filter)
-		parms = dict.ensure_array(:DecodeParms)
+		parms = dict.ensure_array(:DecodeParms).map{|x| x.nil? ? {} : x }
+		parms += [{}] * (filters.size - parms.size)
+
 		[filters, parms].transpose.each{|filter, parms|
 			if filter == :FlateDecode
 				allow = Set.new([:Columns, :Predictor])
