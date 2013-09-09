@@ -1,7 +1,32 @@
+class PDFStream
+	attr_accessor :dict, :stream
+	def initialize(dict, stream)
+		@dict = dict
+		@stream = stream
+	end
+	def inspect
+		"<PDFStream:#{dict},#{stream}>"
+	end
+end
+
+class PDFRef
+	attr_accessor :doc, :id, :gen
+	def initialize(doc, id, gen)
+		@doc = doc
+		@id = id
+		@gen = gen
+	end
+	def inspect
+		"<PDFRef:#{id},#{gen}>"
+	end
+end
+
 class PDFDocument
 	def initialize(fname)
 		@fname = fname
 		@fh = nil
+		@xinf = nil
+		@trailer = nil
 	end
 	def open
 		if @fh.nil?
@@ -12,13 +37,27 @@ class PDFDocument
 		@fh.close
 		@fh = nil
 	end
-	def xref
+	def xinf
+		ensure_xinf_and_trailer
+		@xinf
+	end
+	def trailer
+		ensure_xinf_and_trailer
+		@trailer
+	end
+	def ensure_xinf_and_trailer
+		if @xinf.nil? || @trailer.nil?
+			load_xinf_and_trailer
+		end
+	end
+	def load_xinf_and_trailer
 		loc = xref_loc
 		if !loc
 			return nil
 		end
 		lines = read_next_lines(loc, 2, 9 + max_offset_digits * 2)
-		xinf = []
+		@xinf = []
+		# can't deal with xref streams for the time being
 		if lines =~ /\A(xref#{eol})/
 			sloc = loc + $1.size
 			lines = lines[$1.size..-1]
@@ -27,17 +66,14 @@ class PDFDocument
 				num_ids = $3.to_i
 				start = sloc + $1.size
 				sloc = start + 20 * num_ids
-				xinf << [first_id, num_ids, start]
+				@xinf << [first_id, num_ids, start]
 				lines = read_next_lines(sloc, 1, [9, 3 + max_offset_digits * 2].max)
 			end
 			if lines =~ /\A(trailer#{eol})/
-				puts "Found trailer"
-				#sloc += $1.size
-				#tdict = read_object(sloc)
+				#puts "Found trailer"
+				sloc += $1.size
+				@trailer = read_object(sloc)
 			end
-			xinf
-		else
-			return nil # can't deal with xref streams for the time being
 		end
 	end
 	def xref_loc
@@ -185,16 +221,16 @@ class PDFDocument
 			if num.integer? && num >= 0
 				#puts "Got positive integer"
 				if data[len..-1] =~ / \A ( #{anyspace}* | #{anyspace}+ #{pos_int} (#{anyspace}* | #{anyspace}+ #{regular}+)) \z /x
-					puts "#{data[len..-1]} - could lead into obj or obj ref"
+					#puts "#{data[len..-1]} - could lead into obj or obj ref"
 					return ilen # we don't know whether there is an obj or obj ref
 				end
 				if data[len..-1] =~ / \A (#{anyspace}+ (#{pos_int}) #{anyspace}+ (R|obj)\b) /x
-					puts "Is obj or obj ref"
+					#puts "Is obj or obj ref"
 					num2 = $2.to_i
 					type = $3.to_sym
 					xlen = $1.size
 					if type == :R
-						return [[num, num2, type], ilen + len + xlen]
+						return [PDFRef.new(self, num, num2), ilen + len + xlen]
 					else
 						obj = parse(data[len + xlen .. -1])
 						if !obj.is_a? Array
@@ -206,7 +242,7 @@ class PDFDocument
 							return ilen # failed to get token
 						end
 						tlen = len + xlen + obj[1] + token[1]
-						real_obj = [num, num2, :obj, obj[0]]
+						real_obj = obj[0]
 						if obj[0].is_a?(Hash) && token[0] == :stream
 							#puts "Parsing stream"
 							if data[tlen..-1] !~ /\A ( ( #{comment} | #{sp} )* \r?\n ) /x
@@ -238,7 +274,7 @@ class PDFDocument
 							end
 							#puts "Got final token (hopefully endobj)"
 							tlen += token[1]
-							real_obj = [num, num2, :stream, obj[0], stream]
+							real_obj = PDFStream(obj[0], stream)
 						end
 						if token[0] != :endobj
 							#puts "Failed to get end token (had #{obj[0]}, final parse result is #{token})"
