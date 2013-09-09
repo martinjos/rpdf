@@ -82,7 +82,7 @@ class PDFDocument
 		end
 		return result
 	end
-	SeqMap = {'t' => "\t", 'r' => "\r", 'n' => "\n", 'f' => "\f", 'v' => "\v"}
+	SeqMap = {'t' => "\t", 'r' => "\r", 'n' => "\n", 'f' => "\f", 'v' => "\v", "\n" => ''}
 	def parse(data)
 		data = data.sub /^((\s|#{comment})*)/, ''
 		ilen = $1 ? $1.size : 0
@@ -110,12 +110,23 @@ class PDFDocument
 					if pos + 1 == data.size
 						return ilen # escape sequence doesn't fit
 					end
-					if SeqMap.has_key? data[pos + 1]
+					if data[pos + 1] == "\r" # \n dealt with via SeqMap
+						if pos + 2 < data.size && data[pos + 2] == "\n"
+							pos += 1 # 2 more added on at end
+						end
+						# nothing appended to str
+					elsif SeqMap.has_key? data[pos + 1]
 						str += SeqMap[data[pos + 1]]
 					else
 						str += data[pos + 1]
 					end
 					pos += 2
+				elsif data[pos] == "\r"
+					if pos + 1 < data.size && data[pos + 1] == "\n"
+						pos += 1
+					end
+					str += "\n"
+					pos += 1
 				else
 					if data[pos] == '('
 						level += 1
