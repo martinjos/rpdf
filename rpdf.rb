@@ -98,6 +98,47 @@ class PDFRef
 	end
 end
 
+class PDFRefTab
+end
+
+class PDFOldRefTab < PDFRefTab
+	attr_reader :first, :num
+	def initialize(doc, first, num, pos)
+		@doc = doc
+		@first = first
+		@num = num
+		@pos = pos
+		@data = doc.read_from(pos, 20 * num)
+	end
+	def load(n)
+		if n < first || n >= first + num
+			raise Exception.new("Object number out of range")
+		end
+		pos = (n-@first)*20
+		puts "Using pos #{pos}"
+		entry = @data[pos...pos+20]
+		puts "Entry is #{entry}"
+		fpos = entry[0...10].to_i
+		gen = entry[11...16].to_i
+		new = entry[17] == 'n'
+		if !new
+			return nil
+		end
+		puts "Reading object at #{fpos}"
+		# FIXME: there is a disconnect between the params passed in here and those used for the cache
+		obj = @doc.read_object(fpos)
+		return [obj, gen]
+	end
+	def inspect
+		"<PDFOldRefTab:#{@first},#{@num},#{@pos}>"
+	end
+end
+
+class PDFStreamRefTab < PDFRefTab
+	def initialize(stream)
+	end
+end
+
 class PDFDocument
 	def initialize(fname)
 		@fname = fname
@@ -152,13 +193,13 @@ class PDFDocument
 				num_ids = $3.to_i
 				start = sloc + $1.size
 				sloc = start + 20 * num_ids
-				@xinf << [first_id, num_ids, start]
+				@xinf << PDFOldRefTab.new(self, first_id, num_ids, start)
 				lines = read_next_lines(sloc, 1, [9, 3 + max_offset_digits * 2].max)
 			end
 			if lines =~ /\A(trailer#{eol})/
 				#puts "Found trailer"
 				sloc += $1.size
-				trailer = read_object(sloc)[0]
+				trailer = read_object(sloc)
 				if latest
 					@trailer = trailer
 				end
@@ -173,7 +214,7 @@ class PDFDocument
 		end
 	end
 	def load_real_xinf_stream(loc, chain=false)
-		xstm = read_object(loc)[0]
+		xstm = read_object(loc)
 		@xinf << xstm
 		if @trailer.nil?
 			@trailer = xstm.dict
@@ -224,9 +265,14 @@ class PDFDocument
 			#puts "Retrying with est=#{est}"
 			data = read_from(pos, est)
 		end
-		return result
+		if result.is_a? Array
+			return result[0]
+		else
+			return nil
+		end
 	end
 	SeqMap = {'t' => "\t", 'r' => "\r", 'n' => "\n", 'f' => "\f", 'v' => "\v", "\n" => ''}
+	# TODO: distinguish between can't-succeed and not-enough-data
 	def parse(data)
 		#puts "Parsing '#{data}'"
 		data = data.sub /\A(#{anyspace}*)/, ''
