@@ -82,25 +82,59 @@ class PDFDocument
 		end
 		return result
 	end
+	SeqMap = {'t' => "\t", 'r' => "\r", 'n' => "\n", 'f' => "\f", 'v' => "\v"}
 	def parse(data)
 		data = data.sub /^((\s|#{comment})*)/, ''
 		ilen = $1 ? $1.size : 0
 		if data[0] == '['
 			rec = parse_array(data[1..-1])
 			if rec[1] > data.size - 2 || data[rec[1] + 1] != ']'
-				return nil
+				return ilen
 			end
 			return [rec[0], ilen + rec[1] + 2]
 		elsif data[0..1] == '<<'
 			rec = parse_array(data[2..-1])
 			if rec[1] > data.size - 4 || data[rec[1] + 2..rec[1] + 3] != '>>'
-				return nil
+				return ilen
 			end
 			if rec[0].size % 2 == 1
 				rec[0].pop
 			end
 			return [Hash[*rec[0]], ilen + rec[1] + 4]
 		elsif data[0] == '('
+			str = ''
+			pos = 1
+			level = 1
+			while level > 0 && pos < data.size
+				if data[pos] == '\\'
+					if pos + 1 == data.size
+						return ilen # escape sequence doesn't fit
+					end
+					if SeqMap.has_key? data[pos + 1]
+						str += SeqMap[data[pos + 1]]
+					else
+						str += data[pos + 1]
+					end
+					pos += 2
+				else
+					if data[pos] == '('
+						level += 1
+					elsif data[pos] == ')'
+						level -= 1
+						if level == 0
+							# skip appending to string
+							pos += 1
+							break
+						end
+					end
+					str += data[pos]
+					pos += 1
+				end
+			end
+			if level > 0
+				return ilen
+			end
+			return [str, ilen + pos]
 		elsif data =~ /^(<([0-9A-Fa-f\s]*)>)/
 			len = $1.size
 			str = $2.gsub(/\s+/, '').gsub(/#{hex}{1,2}/) {|match|
@@ -114,7 +148,7 @@ class PDFDocument
 		elsif data =~ /^(#{number})/
 			len = $1.size
 			if len == data.size
-				return nil # we don't know whether it's the true end
+				return ilen # we don't know whether it's the true end
 			end
 			str = $1
 			num = nil
@@ -127,7 +161,7 @@ class PDFDocument
 		elsif data =~ /^\/(#{regular}*)/
 			len = 1 + $1.size
 			if len == data.size
-				return nil # we don't know whether it's the true end
+				return ilen # we don't know whether it's the true end
 			end
 			str = $1
 			sym = str.gsub(/#(#{hex}{2})/) {|match|
@@ -137,7 +171,7 @@ class PDFDocument
 		elsif data =~ /^(#{regular}+)/
 			len = $1.size
 			if len == data.size
-				return nil # we don't know whether it's the true end
+				return ilen # we don't know whether it's the true end
 			end
 			str = $1
 			sym = str.to_sym
@@ -156,7 +190,7 @@ class PDFDocument
 		array = []
 		pos = 0
 		while (item = parse(data[pos..-1])).is_a? Array
-			puts "pos is #{pos}"
+			#puts "pos is #{pos}"
 			array << item[0]
 			pos += item[1]
 		end
