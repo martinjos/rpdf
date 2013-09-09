@@ -1,3 +1,25 @@
+require 'set'
+require 'zlib'
+
+module PDFUtils
+	def self.ensure_array(val)
+		if !val.is_a? Array
+			val = [val]
+		end
+		return val
+	end
+end
+
+class PDFDict < Hash
+	def ensure_array(key)
+		if has_key?(key)
+			PDFUtils.ensure_array(self[key])
+		else
+			[]
+		end
+	end
+end
+
 class PDFStream
 	attr_accessor :dict, :stream
 	def initialize(dict, stream)
@@ -6,6 +28,45 @@ class PDFStream
 	end
 	def inspect
 		"<PDFStream:#{dict},#{stream.size}>"
+	end
+	def apply_filters
+		filters = dict.ensure_array(:Filter)
+		parms = dict.ensure_array(:DecodeParms)
+		[filters, parms].transpose.each{|filter, parms|
+			if filter == :FlateDecode
+				allow = Set.new([:Columns, :Predictor])
+				parms.keys.each{|name|
+					if !allow.member? name
+						raise Exception("Unrecognised parameter for FlateDecode: #{name}")
+					end
+				}
+				pred = parms[:Predictor]
+				cols = parms[:Columns]
+				if pred && pred != 12
+					raise Exception("Unsupported FlateDecode predictor: #{pred}")
+				end
+				if pred && (!cols || !cols.integer? || cols < 1)
+					raise Exception("FlateDecode predictor 12 without valid Columns value")
+				end
+				temp = Zlib::Inflate.inflate(@stream)
+				if pred
+					diffrows(temp, cols)
+				end
+				@stream = temp
+			else
+				raise Exception("Unsupported filter: #{filter}")
+			end
+		}
+		dict.delete(:Filter)
+		dict.delete(:DecodeParms)
+	end
+	def diffrows(data, cols)
+		data <<= "\0" * (4 - data.size%4)
+		(cols...data.size).step(cols) {|i|
+			(i...i+cols).each{|j|
+				data[j] = ((data[j].ord + data[j-cols].ord) % 256).chr
+			}
+		}
 	end
 end
 
@@ -167,7 +228,7 @@ class PDFDocument
 			if rec[0].size % 2 == 1
 				rec[0].pop
 			end
-			return [Hash[*rec[0]], ilen + rec[1] + 4]
+			return [PDFDict[*rec[0]], ilen + rec[1] + 4]
 		elsif data[0] == '('
 			str = ''
 			pos = 1
