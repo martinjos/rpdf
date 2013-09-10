@@ -228,7 +228,7 @@ class PDFObjectStream
 		z = pos + 1 < @index.size ? (@first + @index[pos+1][1])
 								  : @stream.size
 		bytes = @stream[a...z]
-		@doc.parse(bytes) # FIXME: needs to be told that it has effective EOF in this context
+		@doc.parse(bytes, true, true)
 	end
 	def inspect
 		"<PDFObjectStream:#{@base.dict},#{@stream.size}>"
@@ -427,9 +427,9 @@ class PDFDocument
 			return nil
 		end
 	end
-	def parse(data)
+	def parse(data, got_eof=false, no_obj=false)
 		#puts "Calling parse_raw(#{data})"
-		obj = parse_raw(data)
+		obj = parse_raw(data, got_eof, no_obj)
 		#puts "Got #{obj} from parse_raw"
 		if obj.is_a? Array
 			obj[0]
@@ -439,18 +439,18 @@ class PDFDocument
 	end
 	SeqMap = {'t' => "\t", 'r' => "\r", 'n' => "\n", 'f' => "\f", 'v' => "\v", "\n" => ''}
 	# TODO: distinguish between can't-succeed and not-enough-data
-	def parse_raw(data)
+	def parse_raw(data, got_eof=false, no_obj=false)
 		#puts "Parsing '#{data}'"
 		data = data.sub /\A(#{anyspace}*)/, ''
 		ilen = $1 ? $1.size : 0
 		if data[0] == '['
-			rec = parse_array(data[1..-1])
+			rec = parse_array(data[1..-1], got_eof, no_obj)
 			if rec[1] > data.size - 2 || data[rec[1] + 1] != ']'
 				return ilen
 			end
 			return [rec[0], ilen + rec[1] + 2]
 		elsif data[0..1] == '<<'
-			rec = parse_array(data[2..-1])
+			rec = parse_array(data[2..-1], got_eof, no_obj)
 			if rec[1] > data.size - 4 || data[rec[1] + 2..rec[1] + 3] != '>>'
 				return ilen
 			end
@@ -526,7 +526,7 @@ class PDFDocument
 			return [str, ilen + len]
 		elsif data =~ /\A(#{number})/
 			len = $1.size
-			if len == data.size
+			if len == data.size && !got_eof
 				return ilen # we don't know whether it's the true end
 			end
 			str = $1
@@ -536,7 +536,7 @@ class PDFDocument
 			else
 				num = str.to_i
 			end
-			if num.integer? && num >= 0
+			if num.integer? && num >= 0 && !no_obj
 				#puts "Got positive integer"
 				if data[len..-1] =~ / \A ( #{anyspace}* | #{anyspace}+ #{pos_int} (#{anyspace}* | #{anyspace}+ #{regular}+)) \z /x
 					#puts "#{data[len..-1]} - could lead into obj or obj ref"
@@ -550,12 +550,12 @@ class PDFDocument
 					if type == :R
 						return [PDFRef.new(self, num, num2), ilen + len + xlen]
 					else
-						obj = parse_raw(data[len + xlen .. -1])
+						obj = parse_raw(data[len + xlen .. -1], got_eof)
 						if !obj.is_a? Array
 							#puts "Failed to parse inner object"
 							return ilen # failed to parse object
 						end
-						token = parse_raw(data[len + xlen + obj[1] .. -1])
+						token = parse_raw(data[len + xlen + obj[1] .. -1], got_eof)
 						if !token.is_a? Array
 							return ilen # failed to get token
 						end
@@ -580,13 +580,13 @@ class PDFDocument
 							#puts "Got enough chars"
 							stream = data[tlen ... tlen + length]
 							tlen += length
-							estoken = parse_raw(data[tlen .. -1])
+							estoken = parse_raw(data[tlen .. -1], got_eof)
 							if !estoken.is_a?(Array) || estoken[0] != :endstream
 								return ilen
 							end
 							#puts "Got endstream"
 							tlen += estoken[1]
-							token = parse_raw(data[tlen .. -1])
+							token = parse_raw(data[tlen .. -1], got_eof)
 							if !token.is_a?(Array)
 								return ilen
 							end
@@ -608,7 +608,7 @@ class PDFDocument
 			return [num, ilen + len]
 		elsif data =~ /\A\/(#{regular}*)/
 			len = 1 + $1.size
-			if len == data.size
+			if len == data.size && !got_eof
 				return ilen # we don't know whether it's the true end
 			end
 			str = $1
@@ -618,7 +618,7 @@ class PDFDocument
 			return [sym, ilen + len]
 		elsif data =~ /\A(#{regular}+)/
 			len = $1.size
-			if len == data.size
+			if len == data.size && !got_eof
 				return ilen # we don't know whether it's the true end
 			end
 			str = $1
@@ -634,16 +634,24 @@ class PDFDocument
 		end
 		return ilen
 	end
-	def parse_array(data)
+	def parse_array(data, got_eof=false, no_obj=false)
 		array = []
 		pos = 0
-		while (item = parse_raw(data[pos..-1])).is_a? Array
+		while (item = parse_raw(data[pos..-1], got_eof, no_obj)).is_a? Array
 			#puts "pos is #{pos}"
 			array << item[0]
 			pos += item[1]
 		end
 		pos += item # this will be size of spaces/comments
 		return [array, pos]
+	end
+	def parse_contents(data)
+		result = parse_array(data, true, true)
+		if result.is_a? Array
+			result[0]
+		else
+			nil
+		end
 	end
 	def anyspace
 		/\s|#{comment}/
