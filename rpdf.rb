@@ -235,12 +235,45 @@ class PDFObjectStream
 	end
 end
 
+class PDFOutline < Array
+	include PDFDerived
+	def initialize(dict)
+		@hash = {}
+		if dict
+			if dict[:First]
+				item = dict[:First]
+				while item
+					item = item[]
+					child = PDFOutline.new(item)
+					self << child
+					if item[:Title]
+						@hash[item[:Title]] = child
+					end
+					item = item[:Next]
+				end
+			end
+		end
+		@base = dict
+	end
+	def [](idx)
+		if idx.is_a? Numeric
+			super(idx)
+		else
+			@hash[idx]
+		end
+	end
+	def inspect
+		"<PDFOutline:#{@base[:Title].inspect}#{empty? ? "" : (","+super)}>"
+	end
+end
+
 class PDFDocument
 	def initialize(fname)
 		@fname = fname
 		@fh = nil
 		@xinf = nil
 		@trailer = nil
+		@outline = nil
 		@cache = Hash.new {|h,k| h[k] = {} }
 	end
 	def open
@@ -349,6 +382,13 @@ class PDFDocument
 		}
 		@cache[n][g] = obj
 		obj
+	end
+	def outline
+		ensure_xinf_and_trailer
+		if !@outline
+			@outline = PDFOutline.new(@trailer[:Root][][:Outlines][])
+		end
+		@outline
 	end
 
 #private
