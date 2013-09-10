@@ -104,9 +104,22 @@ class PDFRef
 	def inspect
 		"<PDFRef:#{id},#{gen}>"
 	end
+	def []
+		@doc.find_object(@id, @gen)
+	end
+end
+
+module PDFDerived
+	attr_reader :base
 end
 
 class PDFRefTab
+end
+
+class PDFObjectRangeException < Exception
+	def initialize
+		super("Object number out of range")
+	end
 end
 
 class PDFOldRefTab < PDFRefTab
@@ -120,12 +133,12 @@ class PDFOldRefTab < PDFRefTab
 	end
 	def load(n)
 		if n < first || n >= first + num
-			raise Exception.new("Object number out of range")
+			raise PDFObjectRangeException.new
 		end
 		pos = (n-@first)*20
 		#puts "Using pos #{pos}"
 		entry = @data[pos...pos+20]
-		puts "Entry is #{entry}"
+		#puts "Entry is #{entry}"
 		fpos = entry[0...10].to_i
 		gen = entry[11...16].to_i
 		new = entry[17] == 'n'
@@ -133,7 +146,6 @@ class PDFOldRefTab < PDFRefTab
 			return [nil, gen]
 		end
 		#puts "Reading object at #{fpos}"
-		# FIXME: there is a disconnect between the params passed in here and those used for the cache
 		obj = @doc.read_object(fpos)
 		return [obj, gen]
 	end
@@ -143,24 +155,27 @@ class PDFOldRefTab < PDFRefTab
 end
 
 class PDFStreamRefTab < PDFRefTab
+	include PDFDerived
 	def initialize(doc, stm_obj)
 		@doc = doc
 		@index = stm_obj.dict[:Index].each_slice(2).to_a
 		@w = stm_obj.dict[:W]
 		@reclen = @w.inject(&:+)
 		@stream = stm_obj.stream
+		@cache = {}
+		@base = stm_obj
 	end
 	def load(n)
 		offset = 0
 		@index.each{|first,num|
 			if n >= first && n < first + num
 				pos = (offset + n-first)*@reclen
-				puts "Using pos #{pos}"
+				#puts "Using pos #{pos}"
 				entry = @stream[pos...pos+@reclen].split('').map(&:ord)
 				type = PDFUtils.bytes_to_int(entry.shift(@w[0]))
 				f2 = PDFUtils.bytes_to_int(entry.shift(@w[1]))
 				f3 = PDFUtils.bytes_to_int(entry.shift(@w[2]))
-				puts "Got type=#{type}, f2=#{f2}, f3=#{f3}"
+				#puts "Got type=#{type}, f2=#{f2}, f3=#{f3}"
 				obj = nil
 				gen = nil
 				if type == 1
@@ -169,21 +184,54 @@ class PDFStreamRefTab < PDFRefTab
 					gen = f3
 				elsif type == 2
 					# in object stream
-					# (not implemented)
-					#objstr = @doc.find_object(f2, 0)
-					#obj = objstr.
+					if !@cache.has_key?(f2)
+						@cache[f2] = PDFObjectStream.new(@doc, @doc.find_object(f2, 0))
+					end
+					objstr = @cache[f2]
+					obj = objstr.load(f3)
 					gen = 0
 				else
-					gen = f3 # deleted/other
+					# deleted/other
+					gen = f3
 				end
 				return [obj, gen]
 			end
 			offset += num
 		}
-		raise Exception.new("Object number out of range")
+		raise PDFObjectRangeException.new
 	end
 	def inspect
 		"<PDFStreamRefTab:#{@index},#{@w}>"
+	end
+end
+
+# how does /Extends affect the object indexing?
+class PDFObjectStream
+	include PDFDerived
+	def initialize(doc, stm_obj)
+		@doc = doc
+		num_area = stm_obj.stream[0...stm_obj.dict[:First]]
+		@index = []
+		n = stm_obj.dict[:N]
+		while @index.size < n && num_area.sub!(/^\s*([0-9]+)\s+([0-9]+)\s*/, '')
+			@index << [$1.to_i, $2.to_i]
+		end
+		@stream = stm_obj.stream
+		@first = stm_obj.dict[:First]
+		@base = stm_obj
+	end
+	def load(pos)
+		if pos < 0 || pos >= @index.size
+			raise Exception.new("Index out of range")
+		end
+		a = (@first + @index[pos][1])
+		z = pos + 1 < @index.size ? (@first + @index[pos+1][1])
+								  : @stream.size
+		bytes = @stream[a...z]
+		@doc.parse(bytes) # FIXME: needs to be told that it has effective EOF in this context
+	end
+	def inspect
+		"<PDFObjectStream:#{@base.dict},#{@stream.size}>"
 	end
 end
 
@@ -282,6 +330,26 @@ class PDFDocument
 		end
 		return loc
 	end
+	def find_object(n, g)
+		if @cache[n].has_key?(g)
+			return @cache[n][g]
+		end
+		ensure_xinf_and_trailer
+		obj = nil
+		@xinf.each{|x|
+			begin
+				result = x.load(n)
+				if result[1] == g
+					obj = result[0]
+					break
+				end
+			rescue PDFObjectRangeException => e
+				# do nothing - continue
+			end
+		}
+		@cache[n][g] = obj
+		obj
+	end
 
 #private
 	def read_last(n)
@@ -305,16 +373,10 @@ class PDFDocument
 		end
 		data
 	end
-	def find_object(n, g)
-		if @cache[n].has_key?(g)
-			return @cache[n][g]
-		end
-		return nil
-	end
 	def read_object(pos, est=10)
 		data = read_from(pos, est)
 		fsize = @fh.size
-		while !((result = parse(data)).is_a? Array) && pos + est < fsize
+		while !((result = parse_raw(data)).is_a? Array) && pos + est < fsize
 			est = [est * 2, fsize - pos].min
 			#puts "Retrying with est=#{est}"
 			data = read_from(pos, est)
@@ -325,9 +387,19 @@ class PDFDocument
 			return nil
 		end
 	end
+	def parse(data)
+		#puts "Calling parse_raw(#{data})"
+		obj = parse_raw(data)
+		#puts "Got #{obj} from parse_raw"
+		if obj.is_a? Array
+			obj[0]
+		else
+			nil
+		end
+	end
 	SeqMap = {'t' => "\t", 'r' => "\r", 'n' => "\n", 'f' => "\f", 'v' => "\v", "\n" => ''}
 	# TODO: distinguish between can't-succeed and not-enough-data
-	def parse(data)
+	def parse_raw(data)
 		#puts "Parsing '#{data}'"
 		data = data.sub /\A(#{anyspace}*)/, ''
 		ilen = $1 ? $1.size : 0
@@ -438,12 +510,12 @@ class PDFDocument
 					if type == :R
 						return [PDFRef.new(self, num, num2), ilen + len + xlen]
 					else
-						obj = parse(data[len + xlen .. -1])
+						obj = parse_raw(data[len + xlen .. -1])
 						if !obj.is_a? Array
 							#puts "Failed to parse inner object"
 							return ilen # failed to parse object
 						end
-						token = parse(data[len + xlen + obj[1] .. -1])
+						token = parse_raw(data[len + xlen + obj[1] .. -1])
 						if !token.is_a? Array
 							return ilen # failed to get token
 						end
@@ -468,13 +540,13 @@ class PDFDocument
 							#puts "Got enough chars"
 							stream = data[tlen ... tlen + length]
 							tlen += length
-							estoken = parse(data[tlen .. -1])
+							estoken = parse_raw(data[tlen .. -1])
 							if !estoken.is_a?(Array) || estoken[0] != :endstream
 								return ilen
 							end
 							#puts "Got endstream"
 							tlen += estoken[1]
-							token = parse(data[tlen .. -1])
+							token = parse_raw(data[tlen .. -1])
 							if !token.is_a?(Array)
 								return ilen
 							end
@@ -487,7 +559,7 @@ class PDFDocument
 							#puts "Failed to get end token (had #{obj[0]}, final parse result is #{token})"
 							return ilen # failed to get end token
 						end
-						@cache[num][num2] = real_obj # automatically store in cache
+						# FIXME: store id/gen for validation?
 						return [real_obj, ilen + tlen]
 					end
 				end
@@ -525,7 +597,7 @@ class PDFDocument
 	def parse_array(data)
 		array = []
 		pos = 0
-		while (item = parse(data[pos..-1])).is_a? Array
+		while (item = parse_raw(data[pos..-1])).is_a? Array
 			#puts "pos is #{pos}"
 			array << item[0]
 			pos += item[1]
