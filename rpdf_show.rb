@@ -1,6 +1,15 @@
 require 'gtk2'
 require 'matrix'
 
+def mat_6(*args)
+	(a,b,c,d,e,f) = args
+	Matrix.rows([[a,b,0],[c,d,0],[e,f,1]])
+end
+
+def mat_xy(x,y)
+	Matrix.rows([[1,0,0],[0,1,0],[x,y,1]])
+end
+
 def rpdf_show(doc, page)
 	cont = page[-:Contents][].stream
 	res = page[-:Resources]
@@ -40,8 +49,7 @@ def rpdf_show(doc, page)
 			#FIXME: get next glyph origin?
 			rect = layout.extents[1]
 			dx = rect.rbearing - rect.lbearing
-			text_mat = Matrix.rows([text_mat.row(0), text_mat.row(1),
-						[text_mat[2,0]+dx, *text_mat[2,1..2]]])
+			text_mat = mat_xy(dx, 0) * text_mat
 			
 			win.draw_layout(gc, x, y, layout)
 		}
@@ -49,8 +57,7 @@ def rpdf_show(doc, page)
 		actions = {
 			:cm => lambda {|a,b,c,d,e,f|
 				# spec p128 - S8.3.4 Transformation Matrices - note 2
-				user_mat = Matrix.rows([[a, b, 0], [c, d, 0], [e, f, 1]]) *
-								user_mat
+				user_mat = mat_6(a,b,c,d,e,f) * user_mat
 				main_mat = text_mat * user_mat
 			},
 			:q => lambda {
@@ -65,12 +72,11 @@ def rpdf_show(doc, page)
 				main_mat = user_mat
 			},
 			:Tm => lambda {|a,b,c,d,e,f|
-				text_mat = line_mat = Matrix.rows([[a, b, 0], [c, d, 0], [e, f, 1]])
+				text_mat = line_mat = mat_6(a,b,c,d,e,f)
 				main_mat = text_mat * user_mat
 			},
 			:Td => lambda {|x,y|
-				text_mat = line_mat = Matrix.rows([line_mat.row(0), line_mat.row(1),
-										[line_mat[2,0]+x, line_mat[2,1]+y, 1]])
+				text_mat = line_mat = mat_xy(x,y) * line_mat
 				main_mat = text_mat * user_mat
 			},
 			:Tj => lambda {|str|
