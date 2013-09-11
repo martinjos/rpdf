@@ -1,6 +1,13 @@
 require 'gtk2'
 
-def rpdf_show(page)
+def show_string(area, gc, x, y, str)
+	win = area.window
+	layout = Pango::Layout.new(area.pango_context)
+	layout.text = str
+	win.draw_layout(gc, x, y, layout)
+end
+
+def rpdf_show(doc, page)
 	cont = page[-:Contents]
 	res = page[-:Resources]
 	box = page[-:MediaBox]
@@ -23,9 +30,8 @@ def rpdf_show(page)
 		gc = Gdk::GC.new(win)
 		gc.background = white
 		gc.foreground = black
-		layout = Pango::Layout.new(area.pango_context)
-		layout.text = "foobar"
-		win.draw_layout(gc, 30, 30, layout)
+
+		show_string(area, gc, 30, 30, "foobar")
 	}
 
 	window.add(area)
