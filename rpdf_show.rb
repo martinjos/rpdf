@@ -1,13 +1,6 @@
 require 'gtk2'
 require 'matrix'
 
-def show_string(area, gc, x, y, str)
-	win = area.window
-	layout = Pango::Layout.new(area.pango_context)
-	layout.text = str
-	win.draw_layout(gc, x, y, layout)
-end
-
 def rpdf_show(doc, page)
 	cont = page[-:Contents][].stream
 	res = page[-:Resources]
@@ -29,6 +22,7 @@ def rpdf_show(doc, page)
 	syms = doc.parse_contents(cont)
 	user_mat = Matrix.I(3)
 	line_mat = Matrix.I(3)
+	text_mat = Matrix.I(3)
 	main_mat = Matrix.I(3)
 	stack = []
 
@@ -38,41 +32,55 @@ def rpdf_show(doc, page)
 		gc.background = white
 		gc.foreground = black
 
+		show_string = lambda{|x, y, str|
+			win = area.window
+			layout = Pango::Layout.new(area.pango_context)
+			layout.text = str
+
+			#FIXME: get next glyph origin?
+			rect = layout.extents[1]
+			dx = rect.rbearing - rect.lbearing
+			text_mat = Matrix.rows([text_mat.row(0), text_mat.row(1),
+						[text_mat[2,0]+dx, *text_mat[2,1..2]]])
+			
+			win.draw_layout(gc, x, y, layout)
+		}
+
 		actions = {
-			:cm => proc {|a,b,c,d,e,f|
+			:cm => lambda {|a,b,c,d,e,f|
 				# spec p128 - S8.3.4 Transformation Matrices - note 2
 				user_mat = Matrix.rows([[a, b, 0], [c, d, 0], [e, f, 1]]) *
 								user_mat
-				main_mat = line_mat * user_mat
+				main_mat = text_mat * user_mat
 			},
-			:q => proc {
+			:q => lambda {
 				stack << user_mat
 			},
-			:Q => proc {
+			:Q => lambda {
 				user_mat = stack.pop
-				main_mat = line_mat * user_mat
+				main_mat = text_mat * user_mat
 			},
-			:BT => proc {
-				line_mat = Matrix.I(3)
+			:BT => lambda {
+				text_mat = line_mat = Matrix.I(3)
 				main_mat = user_mat
 			},
-			:Tm => proc {|a,b,c,d,e,f|
-				line_mat = Matrix.rows([[a, b, 0], [c, d, 0], [e, f, 1]])
-				main_mat = line_mat * user_mat
+			:Tm => lambda {|a,b,c,d,e,f|
+				text_mat = line_mat = Matrix.rows([[a, b, 0], [c, d, 0], [e, f, 1]])
+				main_mat = text_mat * user_mat
 			},
-			:Td => proc {|x,y|
-				line_mat = Matrix.rows([line_mat.row(0), line_mat.row(1),
+			:Td => lambda {|x,y|
+				text_mat = line_mat = Matrix.rows([line_mat.row(0), line_mat.row(1),
 										[line_mat[2,0]+x, line_mat[2,1]+y, 1]])
-				main_mat = line_mat * user_mat
+				main_mat = text_mat * user_mat
 			},
-			:Tj => proc{|str|
-				show_string(area, gc, main_mat[2,0], height-main_mat[2,1], str)
+			:Tj => lambda {|str|
+				show_string.call(main_mat[2,0], height-main_mat[2,1], str)
 			},
-			:TJ => proc{|array|
+			:TJ => lambda {|array|
 				str = array.map{|item|
 					String === item ? item : ""
 				}.join('')
-				show_string(area, gc, main_mat[2,0], height-main_mat[2,1], str)
+				show_string.call(main_mat[2,0], height-main_mat[2,1], str)
 			},
 		}
 
