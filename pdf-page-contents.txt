@@ -1,0 +1,55 @@
+Relevant page attributes
+------------------------
+
+/MediaBox - output medium dimensions in user space
+
+Relevant operators
+------------------
+
+BT ET - begin/end text mode
+
+TJ - draw text with specified kernings
+Tj - draw text
+Tm - set text matrix
+Td - start new line (with x,y offsets from start of previous line)
+
+gs - set graphics state parameters (using dict)
+q  - save graphics state to GS stack
+Q  - restore graphics state from GS stack
+cm - multiply current transformation matrix (CTM) by matrix
+
+Page attributes of possible future interest
+-------------------------------------------
+
+/CropBox - visible region of user space
+/BleedBox - like /CropBox, but for a "production environment"
+/ArtBox - like /CropBox, but containing only the page's "meaningful content"
+/Rotate - multiple of 90 degrees
+/UserUnit - user space units, in units of 1/72 inch, default = 1
+
+PDF spec sections
+-----------------
+
+w gs		General graphics state		57
+q Q cm		Special graphics state		57
+m l re		Path construction		59
+S n		Path painting			60
+W		Clipping paths			61
+K k		Colour				74
+
+Extraneous operators
+--------------------
+
+BDC EMC - begin/end logical block
+Tf - set text font
+Tc - set character spacing (which acts in conjunction with the glyph's displacement)
+w  - set line width (of graphics state)
+m  - move "current point" (i.e. position) to x,y - beginning new subpath
+l  - draw line to x,y - setting current point to x,y
+re - append rectangle (x,y,w,h) to current path (as new closed subpath)
+S  - stroke the path
+n  - end path object, without filling or stroking it
+W  - intersect current clipping path with the current path
+K  - set stroke colour space and colour to (c,m,y,k)
+k  - set non-stroke colour space and colour to (c,m,y,k)
+

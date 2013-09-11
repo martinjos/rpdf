@@ -1,0 +1,8 @@
+Places keywords/names used (mostly just names)
+
+Streams
+Cross-reference streams (also in doc)
+Object streams
+Outlines (also in doc)
+Parsing obj/ref (keyword & name)
+
