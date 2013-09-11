@@ -1,6 +1,33 @@
 require 'set'
 require 'zlib'
 
+# PDFName - analogous to Symbol
+# input as -:symbol
+# displays as /symbol
+# :symbol != -:symbol
+class PDFName
+	@@hash = {}
+	def initialize(sym)
+		@sym = sym
+	end
+	def self.intern(sym)
+		if !@@hash.has_key? sym
+			@@hash[sym] = PDFName.new(sym)
+		end
+		@@hash[sym]
+	end
+	def inspect
+		"/" + @sym.to_s
+	end
+end
+
+# syntactic sugar to enable -:symbol => /symbol
+class Symbol
+	def -@
+		PDFName.intern(self)
+	end
+end
+
 module PDFUtils
 	def self.ensure_array(val)
 		if !val.is_a? Array
@@ -38,20 +65,20 @@ class PDFStream
 		"<PDFStream:#{dict},#{stream.size}>"
 	end
 	def apply_filters
-		filters = dict.ensure_array(:Filter)
-		parms = dict.ensure_array(:DecodeParms).map{|x| x.nil? ? {} : x }
+		filters = dict.ensure_array(-:Filter)
+		parms = dict.ensure_array(-:DecodeParms).map{|x| x.nil? ? {} : x }
 		parms += [{}] * (filters.size - parms.size)
 
 		[filters, parms].transpose.each{|filter, parms|
-			if filter == :FlateDecode
-				allow = Set.new([:Columns, :Predictor])
+			if filter == -:FlateDecode
+				allow = Set.new([-:Columns, -:Predictor])
 				parms.keys.each{|name|
 					if !allow.member? name
 						raise Exception.new("Unrecognised parameter for FlateDecode: #{name}")
 					end
 				}
-				pred = parms[:Predictor]
-				cols = parms[:Columns]
+				pred = parms[-:Predictor]
+				cols = parms[-:Columns]
 				if pred && pred != 12
 					raise Exception.new("Unsupported FlateDecode predictor: #{pred}")
 				end
@@ -67,8 +94,8 @@ class PDFStream
 				raise Exception.new("Unsupported filter: #{filter}")
 			end
 		}
-		dict.delete(:Filter)
-		dict.delete(:DecodeParms)
+		dict.delete(-:Filter)
+		dict.delete(-:DecodeParms)
 	end
 	def diffrows(data, cols)
 		divmod = data.size.divmod(cols + 1)
@@ -158,8 +185,8 @@ class PDFStreamRefTab < PDFRefTab
 	include PDFDerived
 	def initialize(doc, stm_obj)
 		@doc = doc
-		@index = stm_obj.dict[:Index].each_slice(2).to_a
-		@w = stm_obj.dict[:W]
+		@index = stm_obj.dict[-:Index].each_slice(2).to_a
+		@w = stm_obj.dict[-:W]
 		@reclen = @w.inject(&:+)
 		@stream = stm_obj.stream
 		@cache = {}
@@ -210,14 +237,14 @@ class PDFObjectStream
 	include PDFDerived
 	def initialize(doc, stm_obj)
 		@doc = doc
-		num_area = stm_obj.stream[0...stm_obj.dict[:First]]
+		num_area = stm_obj.stream[0...stm_obj.dict[-:First]]
 		@index = []
-		n = stm_obj.dict[:N]
+		n = stm_obj.dict[-:N]
 		while @index.size < n && num_area.sub!(/^\s*([0-9]+)\s+([0-9]+)\s*/, '')
 			@index << [$1.to_i, $2.to_i]
 		end
 		@stream = stm_obj.stream
-		@first = stm_obj.dict[:First]
+		@first = stm_obj.dict[-:First]
 		@base = stm_obj
 	end
 	def load(pos)
@@ -240,16 +267,16 @@ class PDFOutline < Array
 	def initialize(dict)
 		@hash = {}
 		if dict
-			if dict[:First]
-				item = dict[:First]
+			if dict[-:First]
+				item = dict[-:First]
 				while item
 					item = item[]
 					child = PDFOutline.new(item)
 					self << child
-					if item[:Title]
-						@hash[item[:Title]] = child
+					if item[-:Title]
+						@hash[item[-:Title]] = child
 					end
-					item = item[:Next]
+					item = item[-:Next]
 				end
 			end
 		end
@@ -263,7 +290,7 @@ class PDFOutline < Array
 		end
 	end
 	def inspect
-		"<PDFOutline:#{@base[:Title].inspect}#{empty? ? "" : (","+super)}>"
+		"<PDFOutline:#{@base[-:Title].inspect}#{empty? ? "" : (","+super)}>"
 	end
 end
 
@@ -333,11 +360,11 @@ class PDFDocument
 					@trailer = trailer
 				end
 				#p trailer
-				if trailer.has_key?(:XRefStm)
-					load_real_xinf_stream trailer[:XRefStm]
+				if trailer.has_key?(-:XRefStm)
+					load_real_xinf_stream trailer[-:XRefStm]
 				end
-				if trailer.has_key?(:Prev)
-					load_real_xinf_and_trailer trailer[:Prev]
+				if trailer.has_key?(-:Prev)
+					load_real_xinf_and_trailer trailer[-:Prev]
 				end
 			end
 		end
@@ -348,8 +375,8 @@ class PDFDocument
 		if @trailer.nil?
 			@trailer = xstm.dict
 		end
-		if chain && xstm.dict.has_key?(:Prev)
-			load_real_xinf_stream xstm.dict[:Prev], true
+		if chain && xstm.dict.has_key?(-:Prev)
+			load_real_xinf_stream xstm.dict[-:Prev], true
 		end
 	end
 	def xref_loc
@@ -386,7 +413,7 @@ class PDFDocument
 	def outline
 		ensure_xinf_and_trailer
 		if !@outline
-			@outline = PDFOutline.new(@trailer[:Root][][:Outlines][])
+			@outline = PDFOutline.new(@trailer[-:Root][][-:Outlines][])
 		end
 		@outline
 	end
@@ -568,10 +595,10 @@ class PDFDocument
 							end
 							#puts "Got good chars"
 							tlen += $1.size
-							if !obj[0].has_key?(:Length) || !obj[0][:Length].integer? || obj[0][:Length] < 0
+							if !obj[0].has_key?(-:Length) || !obj[0][-:Length].integer? || obj[0][-:Length] < 0
 								return ilen # failed - not allowing Length refs for now
 							end
-							length = obj[0][:Length]
+							length = obj[0][-:Length]
 							#puts "Got length = #{length}"
 							if data.length < tlen + length + 18 # we need at least "\nendstream\nendobj" and 1 more char to ensure end of token
 								#puts "Not enough chars"
@@ -612,7 +639,7 @@ class PDFDocument
 				return ilen # we don't know whether it's the true end
 			end
 			str = $1
-			sym = str.gsub(/#(#{hex}{2})/) {|match|
+			sym = PDFName.intern str.gsub(/#(#{hex}{2})/) {|match|
 				$1.hex.chr
 			}.to_sym
 			return [sym, ilen + len]
